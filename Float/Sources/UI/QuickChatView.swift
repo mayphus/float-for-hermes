@@ -53,6 +53,7 @@ struct QuickChatView: View {
         PanelGlassContainer {
             VStack(spacing: 10) {
                 card
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { presentation.cardFrame = $0 }
                 if let err = store.lastError ?? store.voice.errorMessage {
                     ErrorPill(text: err) { store.lastError = nil; store.voice.errorMessage = nil }
                         .transition(.move(edge: .top).combined(with: .opacity))

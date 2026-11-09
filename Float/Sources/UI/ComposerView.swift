@@ -94,6 +94,8 @@ struct ComposerView: View {
         return HStack(alignment: .bottom, spacing: 8) {
                 IconButton(symbol: "plus", help: "Attach files (⌘O)") { store.chooseFiles(over: NSApp.keyWindow) }
                     .frame(height: rowHeight)
+                IconButton(symbol: "eye", help: "Show Hermes your screen (attaches one screenshot)") { store.attachScreen() }
+                    .frame(height: rowHeight)
 
                 ZStack(alignment: .leading) {
                     if voice.isListening {
@@ -211,6 +213,7 @@ struct ComposerView: View {
             Button("") { Preferences.shared.stepTextSize(1) }.keyboardShortcut("+", modifiers: .command)
             Button("") { Preferences.shared.stepTextSize(-1) }.keyboardShortcut("-", modifiers: .command)
             Button("") { Preferences.shared.textScale = 1 }.keyboardShortcut("0", modifiers: .command)
+            Button("") { SettingsOpener.open() }.keyboardShortcut(",", modifiers: .command)
         }
         .opacity(0)
         .frame(width: 0, height: 0)

@@ -9,6 +9,8 @@ final class PanelPresentation {
     var focusToken = 0
     /// Set by the controller: refit the window to the card's saved size.
     @ObservationIgnored var refit: () -> Void = {}
+    /// The card's frame in the window (top-left origin), so the notch can tell when the mouse has left it.
+    @ObservationIgnored var cardFrame: CGRect = .zero
 }
 
 /// A borderless, transparent floating panel (Spotlight-style). The window is fixed-size and
@@ -224,6 +226,12 @@ final class PanelController {
     }
 
     private var pasteMonitor: Any?
+    /// The collapsed pill at the notch (unpinned mode only).
+    private var notch: NotchWindow!
+    private var hoverWork: DispatchWorkItem?
+    private var collapseTimer: Timer?
+    private var mouseWasInside = false
+    private var outsideSince: Date?
 
     #if DEBUG
     var window: NSWindow { panel }
@@ -305,6 +313,14 @@ final class PanelController {
             MainActor.assumeIsolated { self?.dismissWork?.cancel() }
         }
         Preferences.shared.onPinnedChange = { [weak self] in self?.applyPinned() }
+        notch = NotchWindow(store: store)
+        notch.host.onClick = { [weak self] in self?.toggle() }
+        notch.host.onHover = { [weak self] inside in self?.pillHover(inside) }
+        notch.host.menuProvider = { [weak self] in self?.makeMenu() ?? NSMenu() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updatePill() }
+        }
+        updatePill()
         applyPlacement()
         trackExpansion()
         NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
@@ -327,6 +343,91 @@ final class PanelController {
         isVisible && panel.isOnActiveSpace ? hide() : show()
     }
 
+    // MARK: Notch pill
+
+    /// The pill sits at the notch whenever Float isn't pinned (a pinned window has its Dock icon instead).
+    private func updatePill() {
+        if isPinned {
+            notch.orderOut(nil)
+        } else {
+            notch.place()
+            notch.orderFrontRegardless()
+        }
+    }
+
+    private func pillHover(_ inside: Bool) {
+        hoverWork?.cancel()
+        guard inside, !isPinned, !isVisible else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, NotchState.shared.hovering, !self.isVisible else { return }
+            self.show()
+        }
+        hoverWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    /// The pill's right-click menu: everything the old menu bar icon offered.
+    private func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        let hk = Preferences.shared.hotKey
+        menu.addItem(ClosureMenuItem("Open Float  \(hk.label)") { [weak self] in self?.show() })
+        menu.addItem(ClosureMenuItem("New Chat", key: "n") { [weak self] in self?.store.newChat(); self?.show() })
+        menu.addItem(ClosureMenuItem("Past Chats…", key: "k") { [weak self] in self?.show(); self?.store.openHistory() })
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem("Pinned Window", checked: isPinned) { Preferences.shared.pinned.toggle() })
+        menu.addItem(ClosureMenuItem("Settings…", key: ",") { SettingsOpener.open() })
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem("Quit Float", key: "q") { NSApp.terminate(nil) })
+        return menu
+    }
+
+    /// While the chat is open from the notch, close it once the mouse has been in and then left the
+    /// card and the pill, as long as nothing is going on: no draft, voice, question, list or reply in flight.
+    private func startCollapseWatch() {
+        collapseTimer?.invalidate()
+        mouseWasInside = isMouseOverChat()
+        outsideSince = nil
+        collapseTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkCollapse() }
+        }
+    }
+
+    private func stopCollapseWatch() {
+        collapseTimer?.invalidate()
+        collapseTimer = nil
+    }
+
+    private func isMouseOverChat() -> Bool {
+        let mouse = NSEvent.mouseLocation
+        if notch.frame.insetBy(dx: -4, dy: -4).contains(mouse) { return true }
+        let f = presentation.cardFrame
+        guard f.width > 0 else { return panel.frame.contains(mouse) }
+        let card = NSRect(x: panel.frame.minX + f.minX, y: panel.frame.maxY - f.maxY, width: f.width, height: f.height)
+        return card.insetBy(dx: -12, dy: -12).contains(mouse)
+    }
+
+    private var isIdleForCollapse: Bool {
+        store.draft.isEmpty && store.attachments.isEmpty && store.activePrompt == nil && !store.showingHistory
+            && !store.isBusy && store.voice.phase == .idle && !store.voice.isConversing
+            && store.editingMessageId == nil && NSEvent.pressedMouseButtons == 0
+            && !store.showSlash
+    }
+
+    private func checkCollapse() {
+        guard !isPinned, isVisible else { stopCollapseWatch(); return }
+        if isMouseOverChat() {
+            mouseWasInside = true
+            outsideSince = nil
+            return
+        }
+        guard mouseWasInside, isIdleForCollapse else { outsideSince = nil; return }
+        if let since = outsideSince {
+            if Date().timeIntervalSince(since) > 0.5 { hide() }
+        } else {
+            outsideSince = Date()
+        }
+    }
+
     // MARK: Pinned window
 
     /// Switch between the floating panel and the pinned window, carrying the chat across.
@@ -334,11 +435,15 @@ final class PanelController {
         if isPinned {
             hideWork?.cancel(); dismissWork?.cancel()
             presentation.isPresented = false
+            NotchState.shared.expanded = false
+            stopCollapseWatch()
             panel.orderOut(nil)
+            updatePill()
             showPinned()
         } else {
             pinnedWindow?.orderOut(nil)
             NSApp.setActivationPolicy(.accessory)
+            updatePill()
             show()
         }
     }
@@ -412,12 +517,16 @@ final class PanelController {
         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
             presentation.isPresented = true
         }
+        NotchState.shared.expanded = true
         presentation.focusToken += 1
+        startCollapseWatch()
         onShow?()
     }
 
     func hide() {
         guard !isPinned else { return }
+        stopCollapseWatch()
+        NotchState.shared.expanded = false
         withAnimation(.spring(response: 0.28, dampingFraction: 0.95)) {
             presentation.isPresented = false
         }
@@ -439,8 +548,20 @@ final class PanelController {
                               width: size.width, height: size.height), display: true)
     }
 
-    /// Reuse the spot the panel was last dragged to; otherwise centre it on the screen with the mouse.
+    /// Hang the panel from the notch (or the top-centre pill), so it opens downward out of it.
     private func position() {
+        if let g = NotchGeometry.current() {
+            let size = panel.frame.size
+            // The card sits 28 pt into the window; this puts its top edge just under the pill.
+            let top = g.screenFrame.maxY - g.height + 22
+            panel.setFrameOrigin(NSPoint(x: (g.screenFrame.midX - size.width / 2).rounded(), y: top - size.height))
+            return
+        }
+        legacyPosition()
+    }
+
+    /// Reuse the spot the panel was last dragged to; otherwise centre it on the screen with the mouse.
+    private func legacyPosition() {
         if let saved = UserDefaults.standard.string(forKey: "panelOrigin") {
             let origin = NSPointFromString(saved)
             let frame = NSRect(origin: origin, size: panel.frame.size)

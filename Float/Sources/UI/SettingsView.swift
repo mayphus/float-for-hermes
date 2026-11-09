@@ -185,7 +185,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .connection: ["Gateway", "URL", "Status", "Sign In", "Sign Out", "Reconnect", "Account", "Bot", "Profile"]
         case .general: ["Shortcut", "Hotkey", "Keyboard", "Pin", "Pinned", "Window", "Dock", "Always on top", "Launch at login", "Startup"]
         case .appearance: ["Text size", "Font", "Zoom", "Background", "Opacity", "Blur", "Tint", "Color", "Glass"]
-        case .notifications: ["Alerts", "Badge", "Menu bar", "Dot"]
+        case .notifications: ["Alerts", "Badge", "Notch", "Pill", "Dot"]
         case .voice: ["Speak", "Speech", "TTS", "Text to speech", "pb62", "Gateway", "Microphone", "Dictation", "Auto send", "Pause"]
         }
     }
@@ -322,7 +322,7 @@ private struct GeneralPane: View {
             } footer: {
                 Text(prefs.pinned
                      ? "Float is a regular window with a Dock icon. It stays open behind other apps; the shortcut brings it to the front."
-                     : "Float is a floating panel that stays on top of other apps. Esc or the shortcut hides it.")
+                     : "Float lives in a pill at the notch and opens on hover, click or the shortcut, on top of other apps. Right-click the pill for its menu.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -332,7 +332,7 @@ private struct GeneralPane: View {
                         catch { launchAtLogin = !on }
                     }
             } footer: {
-                Text("Float starts quietly in the menu bar.")
+                Text("Float starts quietly as the pill at the notch.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -421,7 +421,7 @@ private struct NotificationsPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                Toggle("Show a dot on the menu bar icon", isOn: $prefs.menuBarBadge)
+                Toggle("Show a dot on the notch pill", isOn: $prefs.menuBarBadge)
             }
         }
     }

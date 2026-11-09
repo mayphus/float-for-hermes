@@ -649,13 +649,52 @@ final class ChatStore {
         draft = ""
         voice.markTypedTurn()
         withAnimation(.smooth(duration: 0.3)) { attachments.removeAll() }
+        if ScreenGrab.wantsScreen(text), !files.contains(where: \.isScreen) {
+            Task {
+                let shot = await grabScreen()
+                let note = lastError
+                submit(text: text, files: files + (shot.map { [$0] } ?? []), voiceTurn: false)
+                if shot == nil { lastError = note }  // submit clears errors; keep the screen note visible
+            }
+            return
+        }
         submit(text: text, files: files, voiceTurn: false)
+    }
+
+    /// The eye button: attach a still of the screen to the next message.
+    func attachScreen() {
+        Task {
+            if let shot = await grabScreen() {
+                withAnimation(.snappy) { attachments.append(shot) }
+            }
+        }
+    }
+
+    /// One capture, on demand only. Errors become a short note instead of a failed send.
+    private func grabScreen() async -> Attachment? {
+        do { return try await ScreenGrab.capture() } catch ScreenGrab.Failure.noPermission {
+            lastError = ScreenGrab.permissionNote
+        } catch {
+            lastError = "Couldn't capture the screen: \(error.localizedDescription)"
+        }
+        return nil
     }
 
     private func sendVoice(_ text: String) {
         guard !text.isEmpty, !isBusy else { return }
-        submit(text: text, files: attachments, voiceTurn: true, id: voice.draftID)
+        let files = attachments
+        let id = voice.draftID
         withAnimation { attachments.removeAll() }
+        if ScreenGrab.wantsScreen(text), !files.contains(where: \.isScreen) {
+            Task {
+                let shot = await grabScreen()
+                let note = lastError
+                submit(text: text, files: files + (shot.map { [$0] } ?? []), voiceTurn: true, id: id)
+                if shot == nil { lastError = note }  // submit clears errors; keep the screen note visible
+            }
+            return
+        }
+        submit(text: text, files: files, voiceTurn: true, id: id)
     }
 
     func submit(text: String, files: [Attachment], voiceTurn: Bool, showBubble: Bool = true, id: UUID? = nil) {

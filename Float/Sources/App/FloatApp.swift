@@ -6,15 +6,6 @@ struct FloatApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarContent()
-                .environment(delegate.store)
-                .environment(\.panelToggle, { delegate.panel.toggle() })
-                .environment(\.panelShow, { delegate.panel.show() })
-        } label: {
-            MenuBarIcon(store: delegate.store)
-        }
-
         Settings {
             SettingsView()
                 .environment(delegate.store)
@@ -39,10 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Notifier.shared.onOpen = { [weak self] in self?.panel.show() }
         Preferences.shared.onHotKeyChange = { [weak self] in self?.registerHotKey() }
         store.warmUp()
-        // Opening the app by hand shows the panel; a login-item launch stays quiet in the menu bar.
+        // Opening the app by hand shows the chat; a login-item launch just puts the pill at the notch.
         let event = NSAppleEventManager.shared().currentAppleEvent
         let isLoginLaunch = event?.paramDescriptor(forKeyword: keyAELaunchedAsLogInItem) != nil
-        if !isLoginLaunch {
+        let quiet = ProcessInfo.processInfo.environment["FLOAT_QUIET"] != nil  // dev hook: start collapsed
+        if !isLoginLaunch && !quiet {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.panel.show() }
         }
     }
