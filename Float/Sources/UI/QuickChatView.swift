@@ -1,8 +1,18 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// True inside the pinned window: the card fills a regular window instead of floating at a fixed size.
+private struct FloatPinnedKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var floatPinned: Bool {
+        get { self[FloatPinnedKey.self] }
+        set { self[FloatPinnedKey.self] = newValue }
+    }
+}
+
 struct QuickChatView: View {
     @Environment(ChatStore.self) private var store
+    @Environment(\.floatPinned) private var pinned
     @Environment(PanelPresentation.self) private var presentation
     @State private var isDropTargeted = false
     @Namespace private var glass
@@ -15,6 +25,31 @@ struct QuickChatView: View {
     }
 
     var body: some View {
+        if pinned { pinnedBody } else { panelBody }
+    }
+
+    /// Pinned window: the card is the window. The system draws the shadow and handles resizing.
+    private var pinnedBody: some View {
+        PanelGlassContainer {
+            card
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .overlay(alignment: .top) {
+                    if let err = store.lastError ?? store.voice.errorMessage {
+                        ErrorPill(text: err) { store.lastError = nil; store.voice.errorMessage = nil }
+                            .padding(.top, 62)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+        }
+        .animation(.spring(response: 0.42, dampingFraction: 0.84), value: hasConversation)
+        .animation(.spring(response: 0.45, dampingFraction: 0.86), value: store.voice.isConversing)
+        .animation(.snappy, value: store.lastError)
+        .onChange(of: store.showingHistory) { _, showing in
+            if !showing { presentation.focusToken += 1 }
+        }
+    }
+
+    private var panelBody: some View {
         PanelGlassContainer {
             VStack(spacing: 10) {
                 card
@@ -50,27 +85,27 @@ struct QuickChatView: View {
                 SignInView()
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             } else {
-                if hasConversation {
+                if hasConversation || pinned {
                     HeaderBar()
                         .transition(.move(edge: .top).combined(with: .opacity))
                     if store.showingHistory {
                         HistoryView()
-                            .frame(height: listHeight)
+                            .frame(minHeight: pinned ? 0 : listHeight, maxHeight: pinned ? .infinity : listHeight)
                             .transition(.handoff)
                     } else if store.voice.isConversing {
                         VoiceStage()
-                            .frame(height: listHeight)
+                            .frame(minHeight: pinned ? 0 : listHeight, maxHeight: pinned ? .infinity : listHeight)
                             .transition(.voiceStage)
                     } else if store.isOpeningSession && store.messages.isEmpty {
                         ProgressView()
                             .controlSize(.small)
                             .frame(maxWidth: .infinity)
-                            .frame(height: listHeight)
+                            .frame(minHeight: pinned ? 0 : listHeight, maxHeight: pinned ? .infinity : listHeight)
                             .transition(.opacity)
                     } else {
                         // Shrinks to make room for a question card so the card never outgrows the fixed-size panel.
                         MessageList()
-                            .frame(minHeight: 160, maxHeight: listHeight)
+                            .frame(minHeight: 160, maxHeight: pinned ? .infinity : listHeight)
                             .transition(.handoff)
                     }
                 }
@@ -98,9 +133,9 @@ struct QuickChatView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .panelGlass(RoundedRectangle(cornerRadius: 28, style: .continuous), id: "card", in: glass)
-        .shadow(color: .black.opacity(0.28), radius: 30, y: 16)
+        .shadow(color: .black.opacity(pinned ? 0 : 0.28), radius: 30, y: 16)
         // Grab strips straddle the card's edge (half outside, in the window's transparent margin).
-        .overlay { if store.auth.isSignedIn { ResizeHandles(vertical: hasConversation).padding(-ResizeHandles.overhang) } }
+        .overlay { if store.auth.isSignedIn && !pinned { ResizeHandles(vertical: hasConversation).padding(-ResizeHandles.overhang) } }
         .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted.animation(.snappy)) { providers in
             loadDrop(providers)
             return true
@@ -172,6 +207,7 @@ extension AnyTransition {
 
 struct HeaderBar: View {
     @Environment(ChatStore.self) private var store
+    @Environment(\.floatPinned) private var pinned
     @Environment(\.openSettings) private var openSettings
     @AppStorage("settingsPane") private var settingsPane: SettingsPane = .general
     @State private var showingPicker = false
@@ -243,6 +279,9 @@ struct HeaderBar: View {
                     .transition(.scale.combined(with: .opacity))
             }
             HStack(spacing: 0) {
+                IconButton(symbol: pinned ? "pin.fill" : "pin",
+                           help: pinned ? "Unpin: back to the floating panel" : "Pin as a window",
+                           active: pinned) { Preferences.shared.pinned.toggle() }
                 IconButton(symbol: "clock.arrow.circlepath", help: "Past chats (⌘K)",
                            active: store.showingHistory) { store.toggleHistory() }
                 IconButton(symbol: "square.and.pencil", help: "New chat (⌘N)") { store.newChat() }
@@ -257,7 +296,7 @@ struct HeaderBar: View {
         .padding(.top, 14)
         .padding(.bottom, 8)
         .background(WindowDragArea())
-        .overlay(alignment: .top) { DragGrabber().padding(.top, 4) }
+        .overlay(alignment: .top) { if !pinned { DragGrabber().padding(.top, 4) } }
         .animation(.snappy, value: store.isBusy)
         .animation(.snappy, value: store.showingHistory)
         .task {

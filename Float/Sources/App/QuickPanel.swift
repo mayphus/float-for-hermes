@@ -63,6 +63,56 @@ final class QuickPanel: NSPanel {
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { ImagePreview.shared.end(panel) }
 }
 
+/// The pinned form of Float: a regular, resizable window at normal level. It ignores Esc and
+/// focus loss, shows the app in the Dock while open, and remembers its frame across launches.
+final class PinnedWindow: NSWindow {
+    init(content: some View) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680),
+                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                   backing: .buffered, defer: false)
+        title = "Float"
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            standardWindowButton(b)?.isHidden = true
+        }
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        isMovableByWindowBackground = false
+        isReleasedWhenClosed = false
+        level = .normal
+        collectionBehavior = [.managed, .fullScreenPrimary]
+        minSize = NSSize(width: 380, height: 320)
+
+        let host = NSHostingView(rootView: content)
+        host.sizingOptions = []
+        host.wantsLayer = true
+        host.layer?.backgroundColor = .clear
+        contentView = host
+        if !setFrameUsingName(Self.autosaveName) { center() }
+        setFrameAutosaveName(Self.autosaveName)
+    }
+
+    static let autosaveName = "FloatPinnedWindow"
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
+    /// Esc doesn't hide a pinned window.
+    override func cancelOperation(_ sender: Any?) {}
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let ok = super.makeFirstResponder(responder)
+        if let editor = firstResponder as? NSTextView, editor.isFieldEditor { FieldEditorDrops.adopt(editor) }
+        return ok
+    }
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { ImagePreview.shared.hasItems }
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { ImagePreview.shared.begin(panel) }
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { ImagePreview.shared.end(panel) }
+}
+
 /// SwiftUI text fields edit through a private field editor that takes a dropped file (or the
 /// screenshot thumbnail) and types its path. Files and images go on to the card's drop target
 /// instead, so they become attachments wherever they land; dragged text still drops into the field.
@@ -154,6 +204,10 @@ enum FieldEditorDrops {
 final class PanelController {
     let presentation = PanelPresentation()
     private var panel: QuickPanel!
+    /// Separate presentation for the pinned window: it is always "presented" while it exists.
+    private let pinnedPresentation = PanelPresentation()
+    private var pinnedWindow: PinnedWindow?
+    private var isPinned: Bool { Preferences.shared.pinned }
     private var hideWork: DispatchWorkItem?
     private var dismissWork: DispatchWorkItem?
     private let store: ChatStore
@@ -186,8 +240,13 @@ final class PanelController {
         presentation.refit = { [weak self] in self?.refit() }
         // ⌘V with a copied file or image attaches it instead of pasting text.
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak store] event in
-            guard let self, let store, event.window === self.panel else { return event }
+            guard let self, let store, event.window === self.panel || event.window === self.pinnedWindow else { return event }
             let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            // ⌘W puts a pinned window away (the hotkey or the Dock icon brings it back).
+            if mods == .command, event.charactersIgnoringModifiers == "w", event.window === self.pinnedWindow {
+                self.pinnedWindow?.orderOut(nil)
+                return nil
+            }
             if mods == .command, event.charactersIgnoringModifiers == "k" {
                 store.toggleHistory()
                 return nil
@@ -220,7 +279,7 @@ final class PanelController {
                 // esc leaves edit mode instead of hiding the panel.
                 if event.keyCode == 53, store.editingMessageId != nil { store.cancelEdit(); return nil }
                 // ↑ in an empty composer brings back the last message (not while a card's own field has focus).
-                if event.keyCode == 126, !(self.panel.firstResponder is NSSecureTextField),
+                if event.keyCode == 126, !(event.window?.firstResponder is NSSecureTextField),
                    store.activePrompt == nil, store.recallLastPrompt() { return nil }
             }
             guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -246,6 +305,7 @@ final class PanelController {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.dismissWork?.cancel() }
         }
+        Preferences.shared.onPinnedChange = { [weak self] in self?.applyPinned() }
         applyPlacement()
         trackExpansion()
         NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
@@ -256,10 +316,53 @@ final class PanelController {
         }
     }
 
-    var isVisible: Bool { panel.isVisible && presentation.isPresented }
+    var isVisible: Bool {
+        if isPinned { return (pinnedWindow?.isVisible ?? false) && NSApp.isActive }
+        return panel.isVisible && presentation.isPresented
+    }
 
     /// The hotkey hides a panel you can see; from another desktop it brings an expanded panel here instead.
-    func toggle() { isVisible && panel.isOnActiveSpace ? hide() : show() }
+    /// A pinned window is only ever brought to the front.
+    func toggle() {
+        if isPinned { showPinned(); return }
+        isVisible && panel.isOnActiveSpace ? hide() : show()
+    }
+
+    // MARK: Pinned window
+
+    /// Switch between the floating panel and the pinned window, carrying the chat across.
+    private func applyPinned() {
+        if isPinned {
+            hideWork?.cancel(); dismissWork?.cancel()
+            presentation.isPresented = false
+            panel.orderOut(nil)
+            showPinned()
+        } else {
+            pinnedWindow?.orderOut(nil)
+            NSApp.setActivationPolicy(.accessory)
+            show()
+        }
+    }
+
+    private func showPinned() {
+        let window = pinnedWindow ?? makePinnedWindow()
+        NSApp.setActivationPolicy(.regular)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+        pinnedPresentation.focusToken += 1
+        onShow?()
+    }
+
+    private func makePinnedWindow() -> PinnedWindow {
+        pinnedPresentation.isPresented = true
+        let root = QuickChatView()
+            .environment(store)
+            .environment(pinnedPresentation)
+            .environment(\.floatPinned, true)
+        let window = PinnedWindow(content: root)
+        pinnedWindow = window
+        return window
+    }
 
     /// Compact: a floating launcher that follows you across desktops. Expanded: a normal window that
     /// stays on its desktop and is pulled to the current one when summoned.
@@ -287,7 +390,7 @@ final class PanelController {
     /// and previews (the app stays active for those), don't count as clicking away.
     private func scheduleClickAwayDismiss() {
         dismissWork?.cancel()
-        guard !isExpanded, isVisible else { return }
+        guard !isPinned, !isExpanded, isVisible else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self, !NSApp.isActive, !self.isExpanded, self.isVisible else { return }
             if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.screencaptureui" { return }
@@ -298,6 +401,7 @@ final class PanelController {
     }
 
     func show() {
+        if isPinned { showPinned(); return }
         hideWork?.cancel()
         dismissWork?.cancel()
         applyPlacement()
@@ -314,6 +418,7 @@ final class PanelController {
     }
 
     func hide() {
+        guard !isPinned else { return }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.95)) {
             presentation.isPresented = false
         }

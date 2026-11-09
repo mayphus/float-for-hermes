@@ -47,7 +47,10 @@ final class Preferences {
     static let defaultPanelWidth = 680.0
     static let defaultListHeight = 440.0
 
+    /// Pinned: Float lives in a regular, resizable window (with a Dock icon) instead of the floating panel.
+    var pinned: Bool { didSet { save("pinned", pinned); onPinnedChange?() } }
     @ObservationIgnored var onHotKeyChange: (() -> Void)?
+    @ObservationIgnored var onPinnedChange: (() -> Void)?
 
     private init() {
         let d = UserDefaults.standard
@@ -65,6 +68,7 @@ final class Preferences {
         panelWidth = d.object(forKey: "panelWidth") as? Double ?? Self.defaultPanelWidth
         listHeight = d.object(forKey: "listHeight") as? Double ?? Self.defaultListHeight
         favoriteModels = d.stringArray(forKey: "favoriteModels") ?? []
+        pinned = d.object(forKey: "pinned") as? Bool ?? false
     }
 
     private func save(_ key: String, _ value: Any) {
