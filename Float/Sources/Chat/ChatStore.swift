@@ -89,7 +89,7 @@ final class ChatStore {
     init() {
         auth = AuthManager()
         gateway = GatewayClient(auth: auth)
-        voice = VoiceEngine()
+        voice = VoiceEngine(auth: auth)
         MediaLoader.shared.auth = auth
         gateway.onEvent = { [weak self] type, sid, payload in self?.handleEvent(type, sid, payload) }
         gateway.onServerRequest = { [weak self] id, method, params in self?.handleServerRequest(id, method, params) }

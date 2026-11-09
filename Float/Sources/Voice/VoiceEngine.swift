@@ -4,7 +4,8 @@ import Observation
 import Speech
 
 /// Voice I/O built on Apple's on-device models:
-/// `SpeechAnalyzer` + `SpeechTranscriber` for listening, and the macOS system voice for replies.
+/// `SpeechAnalyzer` + `SpeechTranscriber` for listening; replies are spoken with the Hermes
+/// gateway's TTS (`GatewaySpeaker`), falling back to the macOS system voice.
 @Observable
 final class VoiceEngine {
     enum Phase: Equatable { case idle, preparing, listening, waiting, speaking }
@@ -34,11 +35,12 @@ final class VoiceEngine {
     @ObservationIgnored private var finalized = ""
     @ObservationIgnored private var volatile = ""
     @ObservationIgnored private var lastSpeechAt = Date()
-    @ObservationIgnored private let speaker = SystemVoiceSpeaker()
+    @ObservationIgnored private let speaker: GatewaySpeaker
     @ObservationIgnored private let warmer = OutputWarmer()
     @ObservationIgnored private var speakTask: Task<Void, Never>?
 
-    init() {
+    init(auth: AuthManager? = nil) {
+        speaker = GatewaySpeaker(auth: auth)
         speaker.onFinish = { [weak self] in self?.didFinishSpeaking() }
     }
 
