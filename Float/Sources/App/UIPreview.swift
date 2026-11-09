@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Debug builds only: open the real panel on a sample chat, without the Keychain or the gateway,
+/// Debug builds only: open the real panel on a sample chat, without a real token or the gateway,
 /// to check layout without signing in.
 ///
 ///   -uiPreview                     show the panel on a sample chat

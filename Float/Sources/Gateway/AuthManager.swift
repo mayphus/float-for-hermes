@@ -1,7 +1,6 @@
 import AppKit
 import CryptoKit
 import Foundation
-import Security
 import Observation
 
 /// The token set returned by the gateway's /auth/native/{token,refresh} endpoints.
@@ -53,7 +52,7 @@ final class AuthManager {
 
     init() {
         #if DEBUG
-        if UIPreview.isRequested { return }  // sample data only; reading the Keychain would prompt
+        if UIPreview.isRequested { return }  // sample data only; skip loading a real token
         #endif
         reload()
     }
@@ -62,31 +61,12 @@ final class AuthManager {
     func previewSignIn() { isSignedIn = true }
     #endif
 
-    /// The signing certificate's name (empty when ad-hoc), so the re-save above runs once per identity.
-    private static let signingOwner: String = {
-        var code: SecCode?
-        var stat: SecStaticCode?
-        var info: CFDictionary?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
-              SecCodeCopyStaticCode(code, [], &stat) == errSecSuccess, let s = stat,
-              SecCodeCopySigningInformation(s, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let certs = (info as? [String: Any])?[kSecCodeInfoCertificates as String] as? [SecCertificate],
-              let leaf = certs.first else { return "adhoc" }
-        return (SecCertificateCopySubjectSummary(leaf) as String?) ?? "signed"
-    }()
 
     func reload() {
-        if let data = Keychain.get(account), let t = try? JSONDecoder().decode(TokenSet.self, from: data) {
+        if let data = TokenStore.get(account), let t = try? JSONDecoder().decode(TokenSet.self, from: data) {
             tokens = t
             userId = t.userId
             isSignedIn = true
-            // One-time: re-create the item so it's owned by this build's stable signing identity.
-            // Items made by older ad-hoc builds re-prompt on every rebuild; ours don't.
-            let key = "keychainOwner:" + Self.signingOwner
-            if !UserDefaults.standard.bool(forKey: key) {
-                Keychain.set(data, for: account)
-                UserDefaults.standard.set(true, forKey: key)
-            }
         } else {
             tokens = nil
             isSignedIn = false
@@ -141,7 +121,7 @@ final class AuthManager {
     }
 
     func signOut() {
-        Keychain.delete(account)
+        TokenStore.delete(account)
         tokens = nil
         isSignedIn = false
     }
@@ -180,7 +160,7 @@ final class AuthManager {
     private func store(_ t: TokenSet) {
         tokens = t
         userId = t.userId
-        if let data = try? JSONEncoder().encode(t) { Keychain.set(data, for: account) }
+        if let data = try? JSONEncoder().encode(t) { TokenStore.set(data, for: account) }
         isSignedIn = true
     }
 

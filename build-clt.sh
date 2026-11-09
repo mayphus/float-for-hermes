@@ -27,8 +27,7 @@ sed -e 's/$(DEVELOPMENT_LANGUAGE)/en/' -e 's/$(EXECUTABLE_NAME)/Float/' \
     -e 's/$(PRODUCT_BUNDLE_IDENTIFIER)/com.alexk.float/' Float/Resources/Info.plist > "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp Float/Resources/AppIcon.icns "$APP/Contents/Resources/"
-# Sign with a stable local identity so the Keychain keeps trusting rebuilds (an ad-hoc
-# signature changes every build, and macOS asks again for Float's saved sign-in).
+# Sign with a stable local identity (ad-hoc changes every build).
 # Override with FLOAT_SIGN_IDENTITY; falls back to ad-hoc when the identity is missing.
 IDENTITY="${FLOAT_SIGN_IDENTITY:-Float Local Signing}"
 if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
