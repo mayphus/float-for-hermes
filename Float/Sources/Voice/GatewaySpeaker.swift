@@ -92,6 +92,8 @@ final class GatewaySpeaker: NSObject, AVAudioPlayerDelegate {
                     self.log.error("speak failed: HTTP \(status)")
                     return nil
                 }
+                let provider = json["provider"] as? String ?? "?"
+                self.log.notice("gateway TTS ok: \(data.count) bytes via \(provider, privacy: .public)")
                 return Data(base64Encoded: String(url[url.index(after: comma)...]))
             } catch {
                 if !Task.isCancelled { self.log.error("speak failed: \(error.localizedDescription, privacy: .public)") }

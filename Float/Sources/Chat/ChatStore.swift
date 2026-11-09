@@ -99,6 +99,10 @@ final class ChatStore {
             Task { await self?.flushQueue() }
         }
         voice.onUtterance = { [weak self] text in self?.sendVoice(text) }
+        // Dev hook: FLOAT_SPEAK_TEST="text" speaks that text at launch (checks gateway TTS end to end).
+        if let t = ProcessInfo.processInfo.environment["FLOAT_SPEAK_TEST"], !t.isEmpty {
+            Task { [weak self] in try? await Task.sleep(for: .seconds(3)); self?.voice.speak(t) }
+        }
     }
 
     var activeBot: BotProfile? { bots.first { $0.name == prefs.profile } }
