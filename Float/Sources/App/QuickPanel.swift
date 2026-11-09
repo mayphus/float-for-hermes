@@ -73,10 +73,11 @@ final class PinnedWindow: NSWindow {
                    styleMask: [.borderless, .miniaturizable, .resizable, .fullSizeContentView],
                    backing: .buffered, defer: false)
         title = "Float"
-        // Borderless: no system frame or rim around the card, and the shadow follows the card's rounded shape.
+        // Borderless and shadowless: the card's own glass is the whole window, with no system rim or
+        // rectangular shadow edge peeking out around its rounded corners.
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
         level = .normal
@@ -90,9 +91,6 @@ final class PinnedWindow: NSWindow {
         contentView = host
         if !setFrameUsingName(Self.autosaveName) { center() }
         setFrameAutosaveName(Self.autosaveName)
-        NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: self, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.invalidateShadow() }
-        }
     }
 
     static let autosaveName = "FloatPinnedWindow"
