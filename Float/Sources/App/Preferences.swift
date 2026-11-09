@@ -11,6 +11,7 @@ final class Preferences {
     var profile: String { didSet { save("profile", profile) } }
     var hotKey: HotKeyPreset { didSet { save("hotKey", hotKey.rawValue); onHotKeyChange?() } }
     var speakReplies: Bool { didSet { save("speakReplies", speakReplies) } }
+    /// Only for the fallback system voice, used when the gateway can't speak.
     var speechRate: Double { didSet { save("speechRate", speechRate) } }
     var autoSendOnPause: Bool { didSet { save("autoSendOnPause", autoSendOnPause) } }
     /// Banners when a reply finishes or Hermes needs an answer while the panel is hidden.
@@ -54,7 +55,7 @@ final class Preferences {
 
     private init() {
         let d = UserDefaults.standard
-        gatewayURL = d.string(forKey: "gatewayURL") ?? Self.discoverHermesDesktopURL() ?? "http://127.0.0.1:9119"
+        gatewayURL = d.string(forKey: "gatewayURL") ?? Self.defaultGatewayURL
         profile = d.string(forKey: "profile") ?? "default"
         hotKey = HotKeyPreset(rawValue: d.string(forKey: "hotKey") ?? "") ?? .optionSpace
         speakReplies = d.object(forKey: "speakReplies") as? Bool ?? true
@@ -92,16 +93,8 @@ final class Preferences {
         URL(string: gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/+$", with: "", options: .regularExpression))
     }
 
-    /// Reuse the remote gateway the Hermes desktop app is already pointed at.
-    static func discoverHermesDesktopURL() -> String? {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: "Library/Application Support/Hermes/connection.json")
-        guard let data = try? Data(contentsOf: url),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let remote = obj["remote"] as? [String: Any],
-              let s = remote["url"] as? String, !s.isEmpty else { return nil }
-        return s
-    }
+    /// The Hermes dashboard on pb62. Float keeps its own URL; it doesn't read any local Hermes install.
+    static let defaultGatewayURL = "http://192.168.66.170:9119"
 }
 
 extension Font {

@@ -68,14 +68,10 @@ final class QuickPanel: NSPanel {
 final class PinnedWindow: NSWindow {
     init(content: some View) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680),
-                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                   styleMask: [.borderless, .miniaturizable, .resizable, .fullSizeContentView],
                    backing: .buffered, defer: false)
         title = "Float"
-        titleVisibility = .hidden
-        titlebarAppearsTransparent = true
-        for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            standardWindowButton(b)?.isHidden = true
-        }
+        // Borderless: no system frame or rim around the card, and the shadow follows the card's rounded shape.
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
@@ -92,6 +88,9 @@ final class PinnedWindow: NSWindow {
         contentView = host
         if !setFrameUsingName(Self.autosaveName) { center() }
         setFrameAutosaveName(Self.autosaveName)
+        NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: self, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.invalidateShadow() }
+        }
     }
 
     static let autosaveName = "FloatPinnedWindow"
@@ -364,12 +363,12 @@ final class PanelController {
         return window
     }
 
-    /// Compact: a floating launcher that follows you across desktops. Expanded: a normal window that
-    /// stays on its desktop and is pulled to the current one when summoned.
+    /// Always above other apps (full-screen spaces too). Compact follows you across desktops;
+    /// expanded stays on its desktop and is pulled to the current one when summoned.
     private func applyPlacement() {
         let expanded = isExpanded
-        panel.isFloatingPanel = !expanded
-        panel.level = expanded ? .normal : .floating
+        panel.isFloatingPanel = true
+        panel.level = .floating
         panel.collectionBehavior = expanded
             ? [.moveToActiveSpace, .fullScreenAuxiliary, .transient]
             : [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]

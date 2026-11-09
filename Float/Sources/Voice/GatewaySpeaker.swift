@@ -3,7 +3,7 @@ import Foundation
 import os
 
 /// Speaks replies with the Hermes gateway's own TTS (`POST /api/audio/speak`), i.e. whatever
-/// provider and voice are picked in Hermes Desktop › Settings › Voice › Text to speech.
+/// provider and voice come from Hermes' `tts:` config on the gateway host (pb62).
 ///
 /// The reply is cut into sentences; the first is requested right away and each next one is
 /// fetched while the current one plays, so speech starts after one short synthesis and then

@@ -122,7 +122,9 @@ struct QuickChatView: View {
                 }
             }
         }
-        .background { PanelBackdrop(opacity: prefs.backgroundOpacity, tint: .panelTint(prefs.backgroundTint)) }
+        // Pinned windows go behind other apps' windows, so keep the frosting on even if the panel is set clear.
+        .background { PanelBackdrop(opacity: pinned ? max(0.55, prefs.backgroundOpacity) : prefs.backgroundOpacity,
+                                    tint: .panelTint(prefs.backgroundTint)) }
         .background {
             if isDropTargeted {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -208,21 +210,12 @@ extension AnyTransition {
 struct HeaderBar: View {
     @Environment(ChatStore.self) private var store
     @Environment(\.floatPinned) private var pinned
-    @Environment(\.openSettings) private var openSettings
-    @AppStorage("settingsPane") private var settingsPane: SettingsPane = .general
-    @State private var showingPicker = false
-
     private var botName: String { store.botName }
 
     var body: some View {
         HStack(spacing: 10) {
-            // Title first; who and which model sit underneath as a subtitle that opens the bot/model menu.
-            // Only the title flexes, so a long name truncates and nothing else moves.
-            Button { showingPicker.toggle() } label: {
-                BotAvatar(name: botName, size: 30)
-            }
-            .buttonStyle(.plain)
-            .help("Switch model or thinking")
+            // Title, with the bot underneath. Hermes picks the model (its default); there's no picker here.
+            BotAvatar(name: botName, size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 if store.showingHistory {
                     Text("Chats")
@@ -232,45 +225,10 @@ struct HeaderBar: View {
                     ChatTitle()
                         .transition(.handoff)
                 }
-                Button { showingPicker.toggle() } label: {
-                    HStack(spacing: 3) {
-                        Text("\(botName) ·")
-                            .lineLimit(1)
-                            .layoutPriority(1)
-                        // The popover points at the model name: what it's for, and nothing before it
-                        // changes width (the ⚡ comes and goes after it).
-                        Text(shortModel)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .contentTransition(.numericText())
-                            .popover(isPresented: $showingPicker, arrowEdge: .bottom) {
-                                ModelPicker(openSettings: {
-                                    settingsPane = .general
-                                    NSApp.activate()
-                                    openSettings()
-                                }, dismiss: { showingPicker = false })
-                                .environment(store)
-                            }
-                        if store.currentCapabilities.reasoning {
-                            Text("·")
-                            ThinkingBadge(level: store.thinking)
-                        }
-                        if store.fastMode {
-                            Image(systemName: "bolt.fill")
-                                .font(.system(size: 9.5, weight: .semibold))
-                                .foregroundStyle(.orange)
-                                .help("Fast mode is on")
-                                .transition(.scale.combined(with: .opacity))
-                        }
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                    }
+                Text(botName)
+                    .lineLimit(1)
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Switch model or thinking")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -301,12 +259,7 @@ struct HeaderBar: View {
         .animation(.snappy, value: store.showingHistory)
         .task {
             if store.bots.isEmpty { await store.refreshBots() }
-            if store.models.isEmpty { await store.refreshModels() }
         }
-    }
-
-    private var shortModel: String {
-        store.currentModel.isEmpty ? "Model" : ModelChoice.displayName(store.currentModel)
     }
 }
 

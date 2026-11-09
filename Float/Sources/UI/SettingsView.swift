@@ -125,7 +125,6 @@ struct SettingsView: View {
         switch selection {
         case .connection: ConnectionPane()
         case .general: GeneralPane()
-        case .models: ModelsPane()
         case .appearance: AppearancePane()
         case .notifications: NotificationsPane(notifier: notifier)
         case .voice: VoicePane()
@@ -136,7 +135,7 @@ struct SettingsView: View {
 // MARK: - Panes
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case connection, general, models, appearance, notifications, voice
+    case connection, general, appearance, notifications, voice
 
     var id: String { rawValue }
 
@@ -144,7 +143,6 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .connection: "Hermes"
         case .general: "General"
-        case .models: "Models"
         case .appearance: "Appearance"
         case .notifications: "Notifications"
         case .voice: "Voice"
@@ -153,12 +151,11 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .connection: "Your gateway, sign-in, and which bot you chat with."
-        case .general: "How you summon Float, and when it starts."
-        case .models: "Pick the models the panel's menu puts first."
+        case .connection: "Your Hermes gateway on pb62, sign-in, and which bot you chat with."
+        case .general: "How you summon Float, how it sits on screen, and when it starts."
         case .appearance: "Text size and how the panel's glass looks over your desktop."
         case .notifications: "Get a heads-up when a reply lands while the panel is hidden."
-        case .voice: "Talk to Hermes and hear replies read aloud."
+        case .voice: "Talk to Hermes and hear replies in the voice set on pb62."
         }
     }
 
@@ -166,7 +163,6 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .connection: "bolt.horizontal.fill"
         case .general: "gearshape.fill"
-        case .models: "cpu.fill"
         case .appearance: "paintbrush.fill"
         case .notifications: "bell.badge.fill"
         case .voice: "waveform"
@@ -177,7 +173,6 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .connection: .indigo
         case .general: .gray
-        case .models: .purple
         case .appearance: .blue
         case .notifications: .red
         case .voice: .orange
@@ -188,11 +183,10 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var keywords: [String] {
         switch self {
         case .connection: ["Gateway", "URL", "Status", "Sign In", "Sign Out", "Reconnect", "Account", "Bot", "Profile"]
-        case .general: ["Shortcut", "Hotkey", "Keyboard", "Launch at login", "Startup"]
-        case .models: ["Model", "Provider", "Favorite", "Favourite", "Menu", "Anthropic", "Claude", "ChatGPT", "OpenAI", "GPT"]
+        case .general: ["Shortcut", "Hotkey", "Keyboard", "Pin", "Pinned", "Window", "Dock", "Always on top", "Launch at login", "Startup"]
         case .appearance: ["Text size", "Font", "Zoom", "Background", "Opacity", "Blur", "Tint", "Color", "Glass"]
         case .notifications: ["Alerts", "Badge", "Menu bar", "Dot"]
-        case .voice: ["Speak", "Speech", "Siri", "Speed", "Rate", "Microphone", "Dictation", "Auto send", "Pause"]
+        case .voice: ["Speak", "Speech", "TTS", "Text to speech", "pb62", "Gateway", "Microphone", "Dictation", "Auto send", "Pause"]
         }
     }
 }
@@ -324,6 +318,14 @@ private struct GeneralPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Pinned window", isOn: $prefs.pinned)
+            } footer: {
+                Text(prefs.pinned
+                     ? "Float is a regular window with a Dock icon. It stays open behind other apps; the shortcut brings it to the front."
+                     : "Float is a floating panel that stays on top of other apps. Esc or the shortcut hides it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         do { on ? try SMAppService.mainApp.register() : try SMAppService.mainApp.unregister() }
@@ -393,51 +395,6 @@ private struct AppearancePane: View {
     }
 }
 
-private struct ModelsPane: View {
-    @Environment(ChatStore.self) private var store
-    @State private var prefs = Preferences.shared
-
-    var body: some View {
-        PaneForm(pane: .models) {
-            Section {
-                HStack {
-                    Text("Only providers you've set up on the gateway are listed. Your picks are saved on this Mac.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Refresh") { Task { await store.refreshModels() } }
-                }
-            }
-            let groups = Dictionary(grouping: store.models, by: \.providerName)
-            if store.models.isEmpty {
-                Section {
-                    if store.isLoadingModels || (store.modelsError == nil && !store.modelsFetched) {
-                        LabeledContent("Loading models from your gateway…") { ProgressView().controlSize(.small) }
-                    } else {
-                        Text(store.modelsError.map { "Couldn't load models: \($0)" } ?? "The gateway listed no models. Check your providers.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            ForEach(groups.keys.sorted(), id: \.self) { provider in
-                let choices = groups[provider] ?? []
-                let picked = choices.contains(where: prefs.isFavorite)
-                Section {
-                    ForEach(choices) { choice in
-                        Toggle(choice.model, isOn: Binding(get: { prefs.isFavorite(choice) },
-                                                           set: { prefs.setFavorite(choice, $0) }))
-                    }
-                } header: {
-                    Text(provider)
-                } footer: {
-                    Text(picked ? "The rest are under More Models." : "None picked, so the menu shows the newest few.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .task { if store.models.isEmpty { await store.refreshModels() } }
-    }
-}
-
 private struct NotificationsPane: View {
     let notifier: Notifier
     @State private var prefs = Preferences.shared
@@ -482,26 +439,13 @@ private struct VoicePane: View {
             }
             Section {
                 Toggle("Speak replies to voice messages", isOn: $prefs.speakReplies)
-                LabeledContent("Speed") {
-                    HStack(spacing: 8) {
-                        Image(systemName: "tortoise.fill").font(.system(size: 11)).foregroundStyle(.secondary)
-                        Slider(value: $prefs.speechRate, in: 0.4...0.62)
-                            .frame(width: 160)
-                        Image(systemName: "hare.fill").font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                }
                 LabeledContent("Voice") {
-                    HStack {
-                        Button("Preview") { store.voice.speak("Hi, I'm Hermes. What can I do for you?") }
-                        Button("Choose System Voice…") {
-                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Accessibility-Settings.extension?SpokenContent")!)
-                        }
-                    }
+                    Button("Preview") { store.voice.speak("Hi, I'm Hermes. What can I do for you?") }
                 }
             } header: {
                 Text("Replies")
             } footer: {
-                Text("Replies use your Mac's system voice. macOS only lets Apple's own speech tools use Siri voices, so Float speaks through the system voice. Pick a Siri voice under Accessibility › Read & Speak › System voice.")
+                Text("Hermes on pb62 speaks replies, in the voice set in its text-to-speech config. If the gateway can't speak, Float falls back to your Mac's system voice.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
